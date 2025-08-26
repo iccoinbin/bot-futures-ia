@@ -28,7 +28,7 @@ async def load_last_candles(pool, symbol: str, interval: str, lookback: int = 25
     async with pool.acquire() as con:
         rows = await con.fetch(q, symbol, interval, lookback)
     df = to_frame(rows, ["open_time","open","high","low","close","volume","n_trades"])
-    if df.empty: 
+    if df.empty:
         return df
     df = df.sort_values("open_time").set_index("open_time")
     # força tipos

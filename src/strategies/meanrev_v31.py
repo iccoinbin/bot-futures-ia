@@ -27,10 +27,10 @@ def run_meanrev(df: pd.DataFrame, cfg: dict):
             continue
 
         price=float(r["close"]); atr=float(r["atr"]); vwap=float(r["vwap"])
-        if atr<=0: 
+        if atr<=0:
             continue
         r_val=sl_mult*atr; qty=(cap*rpct)/r_val if r_val>0 else 0.0
-        if qty<=0: 
+        if qty<=0:
             continue
 
         side=0

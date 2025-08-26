@@ -218,7 +218,7 @@ def main_loop():
                                 _log(f"SKIP_STALE sym={sym} tf={tf} ts={last_ts}")
                                 continue
                             LAST_SEEN[key] = last_ts
-                            
+
                             rows = [
                                 (
                                     row["ts"], row["symbol"], row["timeframe"],
