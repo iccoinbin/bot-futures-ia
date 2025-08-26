@@ -27,7 +27,7 @@ if __name__ == "__main__":
     for sym in symbols:
         in_file = f"data/{sym}_{tf}_{days}d.csv"
         if not Path(in_file).exists():
-            print(f"{sym}: arquivo não encontrado: {in_file}. Rode o fetch antes."); 
+            print(f"{sym}: arquivo não encontrado: {in_file}. Rode o fetch antes.");
             continue
 
         df = pd.read_csv(in_file, parse_dates=["open_time","close_time"])

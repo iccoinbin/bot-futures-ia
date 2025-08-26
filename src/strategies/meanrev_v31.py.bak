@@ -19,7 +19,7 @@ def run_meanrev(df: pd.DataFrame, cfg: dict):
         price=float(row["close"]); atr=float(row["atr"]); vwap=float(row["vwap"])
         r_value = sl_mult*atr if atr>0 else 0.0
         if position==0:
-            if r_value<=0: 
+            if r_value<=0:
                 continue
             long_sig = price <= vwap - k*atr
             short_sig = price >= vwap + k*atr

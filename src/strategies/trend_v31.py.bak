@@ -31,7 +31,7 @@ def run_trend(df: pd.DataFrame, cfg: dict):
         trend = int(row["trend"])
         r_value = sl_mult * atr if atr>0 else 0.0
         if position == 0:
-            if r_value <= 0: 
+            if r_value <= 0:
                 continue
             ema_fast = float(row.get("ema_fast", price))
             if abs(price - ema_fast) > 0.2 * atr:
