@@ -1,0 +1,39 @@
+symbol: BTCUSDT
+timeframe: "1m"          # 1m ou 5m
+history_days: 30         # quantos dias baixar para o backtest
+
+indicators:
+  ema_fast: 21
+  ema_slow: 55
+  atr_period: 14
+  adx_period: 14
+
+filters:
+  use_adx_filter: true
+  adx_min: 20            # somente trend-follow se ADX >= adx_min
+  use_atr_quantile: true
+  atrq_low: 0.20         # operar somente quando ATR% entre quantis [low, high]
+  atrq_high: 0.80
+  block_funding_minutes: 10  # pausar N min antes/depois da virada de hora (funding hourly simplificado)
+
+execution:
+  mode: "maker_first"    # "maker_first" ou "taker"
+  tp_atr_mult: 2.0
+  sl_atr_mult: 0.9
+  partial_at_r: 1.0      # realiza 50% em 1R (0 = desliga)
+  trailing_after_r: 1.0  # ativa trailing após 1R
+  trailing_atr_mult: 1.0 # stop = preço favorável -/+ mult*ATR
+
+slippage_fees:
+  maker_bps: 1.8         # VIP0 ~0.018%
+  taker_bps: 4.5         # VIP0 ~0.045%
+  slip_bps_base: 2.0     # slippage base em bps
+  slip_bps_perc_of_atr: 0.10  # adicional: % do ATR como slippage (0.10 = 10% do ATR como spread/2)
+
+funding:
+  rate_per_hour: 0.0     # simplificação: funding médio por hora (0.0 na testnet); use 0.01 para 1%/hora (exemplo)
+
+risk:
+  capital_usdt: 10000
+  risk_per_trade_pct: 0.35
+  max_consecutive_losses: 3

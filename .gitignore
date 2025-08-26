@@ -1,0 +1,43 @@
+# --- Python / build ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+.pytest_cache/
+.coverage*
+htmlcov/
+.cache/
+
+# --- Ambientes / segredos ---
+.venv/
+venv/
+.env
+.env.*
+
+# --- IDE/OS ---
+.idea/
+.vscode/
+*.code-workspace
+.DS_Store
+Thumbs.db
+
+# --- Logs / dados grandes ---
+logs/
+*.log
+*.tmp
+tmp/
+data/
+datasets/
+notebooks/.ipynb_checkpoints
+
+# --- Bancos locais ---
+*.sqlite
+*.sqlite3
+*.db
+botfutures.db

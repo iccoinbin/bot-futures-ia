@@ -1,0 +1,20 @@
+symbols: ["ETHUSDT"]
+timeframe: "5m"
+history_days: 60
+filters:
+  adx_trend_min: 999
+  use_atr_quantile: true
+  atrq_low: 0.30
+  atrq_high: 0.75
+execution:
+  mode: "taker"
+  tp_atr_mult: 1.7
+  sl_atr_mult: 0.9
+  partial_at_r: 0.8
+  trailing_after_r: 1.0
+  trailing_atr_mult: 0.9
+slippage_fees:
+  maker_bps: 0.020
+  taker_bps: 0.060
+  slip_bps_base: 0.06
+  slip_bps_perc_of_atr: 0.15

@@ -1,0 +1,20 @@
+symbol: BTCUSDT
+lookbacks:
+  decision: "1m"
+  context: "15m"
+indicators:
+  ema_fast: 21
+  ema_slow: 55
+  atr_period: 14
+execution:
+  min_confidence: 0.60
+  tp_atr_mult: 1.5
+  sl_atr_mult: 1.0
+  use_trailing_after_atr: 1.0
+slippage:
+  model: simple
+  taker_bps: 5
+  maker_bps: 1
+risk:
+  capital_usdt: 10000
+  risk_per_trade_pct: 0.35

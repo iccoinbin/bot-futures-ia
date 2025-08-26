@@ -1,0 +1,246 @@
+import os, subprocess
+from fastapi import FastAPI, Depends, Request, HTTPException
+from fastapi import Depends
+from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from starlette.staticfiles import StaticFiles
+from starlette.templating import Jinja2Templates
+
+app = FastAPI()
+
+# ---------- Auth ----------
+security = HTTPBasic()
+USER = os.getenv("WEBUI_USER", "admin")
+PASS = os.getenv("WEBUI_PASS", "botfutures")
+def require_auth(credentials: HTTPBasicCredentials = Depends(security)):
+    if credentials.username != USER or credentials.password != PASS:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return True
+
+# ---------- Static/Templates ----------
+BASE_DIR = os.path.dirname(__file__)
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+TEMPL_DIR  = os.path.join(BASE_DIR, "templates")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+templates = Jinja2Templates(directory=TEMPL_DIR)
+
+# ---------- Lazy import para evitar problemas de import/patch ----------
+def _svc():
+    from services import vm_status, list_services, service_start, service_stop
+    return vm_status, list_services, service_start, service_stop
+
+# ---------- Página ----------
+@app.get("/", response_class=HTMLResponse)
+def home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+# ---------- Saúde/Status ----------
+def _tmux_has(name: str) -> bool:
+    try:
+        r = subprocess.run(["bash","-lc", f"tmux has-session -t {name}"], capture_output=True)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+@app.get("/api/health")
+def api_health(dep: bool = Depends(require_auth)):
+    # Mantém o shape que a UI espera
+    db_ok = True  # DB ok (melhorar depois se precisar)
+    return {
+        "db_ok": db_ok,
+        "feature_engine_running": _tmux_has("fe_v1"),
+        "collector_running": _tmux_has("collector_candles"),
+    }
+
+@app.get("/api/status")
+def api_status(dep: bool = Depends(require_auth)):
+    # Compatível com a UI antiga (espelha /api/health)
+    return api_health()
+
+@app.get("/api/vm_status")
+def api_vm_status(dep: bool = Depends(require_auth)):
+    _vm_status, *_ = _svc()
+    return JSONResponse(_vm_status())
+
+# ---------- Serviços (descoberta + start/stop genéricos) ----------
+def api_services(dep: bool = Depends(require_auth)):
+    _list_services, *_ = _svc()
+    try:
+        data = _list_services()
+        return JSONResponse(data)
+    except Exception as e:
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
+
+@app.post("/api/services/{name}/start")
+def api_service_start(name: str, dep: bool = Depends(require_auth)):
+    *_, service_start, _ = _svc()
+    ok, msg = service_start(name)
+    return {"ok": ok, "message": msg}
+
+@app.post("/api/services/{name}/stop")
+def api_service_stop(name: str, dep: bool = Depends(require_auth)):
+    *_, _, service_stop = _svc()
+    ok, msg = service_stop(name)
+    return {"ok": ok, "message": msg}
+
+# ---------- Endpoints legados (botões antigos da UI) ----------
+@app.post("/api/start/feature_engine")
+def start_fe(dep: bool = Depends(require_auth)):
+    return api_service_start("feature_engine")
+
+@app.post("/api/stop/feature_engine")
+def stop_fe(dep: bool = Depends(require_auth)):
+    return api_service_stop("feature_engine")
+
+@app.post("/api/start/collector")
+def start_col(dep: bool = Depends(require_auth)):
+    return api_service_start("collector")
+
+@app.post("/api/stop/collector")
+def stop_col(dep: bool = Depends(require_auth)):
+    return api_service_stop("collector")
+
+# ---------- Stubs simples para não quebrar a UI (opcionais) ----------
+@app.get("/api/logs/{name}", response_class=PlainTextResponse)
+def api_logs(name: str, dep: bool = Depends(require_auth)):
+    return "logs indisponíveis no momento\n"
+
+@app.get("/api/errors", response_class=PlainTextResponse)
+def api_errors(dep: bool = Depends(require_auth)):
+    return ""
+
+@app.get("/api/services", dependencies=[Depends(require_auth)])
+def api_services(dep: bool = Depends(require_auth)) -> JSONResponse:
+    try:
+        from services import list_services
+        data = list_services()
+        return JSONResponse(data)
+    except Exception as e:
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
+
+@app.get("/api/vm_status")
+def api_vm_status(dep: bool = Depends(require_auth)) -> JSONResponse:
+    try:
+        from services import vm_status
+        return JSONResponse(vm_status())
+    except Exception as e:
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
+
+
+@app.get("/api/services", dependencies=[Depends(require_auth)])
+def api_services(dep: bool = Depends(require_auth)) -> JSONResponse:
+    try:
+        from services import list_services
+        data = list_services()
+        return JSONResponse(data)
+    except Exception as e:
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
+
+
+@app.get("/api/vm_status")
+def api_vm_status(dep: bool = Depends(require_auth)) -> JSONResponse:
+    try:
+        from services import vm_status
+        return JSONResponse(vm_status())
+    except Exception as e:
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
+
+@app.get("/api/vm_status", dependencies=[Depends(require_auth)])
+def api_vm_status(dep: bool = Depends(require_auth)) -> JSONResponse:
+    try:
+        data = vm_status()
+        return JSONResponse(data)
+    except Exception as e:
+        return JSONResponse({'error': f"{type(e).__name__}: {e}"}, status_code=500)
+
+
+@app.get("/api/services", dependencies=[Depends(require_auth)])
+def api_services(dep: bool = Depends(require_auth)) -> JSONResponse:
+    try:
+        data = list_services()
+        return JSONResponse(data)
+    except Exception as e:
+        return JSONResponse({'error': f"{type(e).__name__}: {e}"}, status_code=500)
+
+
+@app.get("/api/services", dependencies=[Depends(require_auth)])
+def api_services(dep: bool = Depends(require_auth)) -> JSONResponse:
+    try:
+        data = list_services()
+        # Normaliza o formato esperado
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            data = {"items": list(data) if data is not None else []}
+        items = data.get("items") or []
+        vm = data.get("vm_status") or vm_status()
+        return JSONResponse({"items": items, "vm_status": vm})
+    except Exception as e:
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
+
+
+@app.get("/api/services", dependencies=[Depends(require_auth)])
+def api_services(dep: bool = Depends(require_auth)) -> JSONResponse:
+    try:
+        data = list_services()
+        # Normaliza/fortalece o payload
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            data = {"items": list(data) if data is not None else []}
+        items = data.get("items") or []
+        vm = data.get("vm_status") or vm_status()
+        return JSONResponse({"items": items, "vm_status": vm})
+    except Exception as e:
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
+
+@app.get("/api/services", dependencies=[Depends(require_auth)])
+def api_services(dep: bool = Depends(require_auth)) -> JSONResponse:
+    try:
+        data = list_services()
+        # Normaliza a estrutura
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            data = {"items": list(data) if data is not None else []}
+        items = data.get("items") or []
+        vm = data.get("vm_status") or vm_status()
+        return JSONResponse({"items": items, "vm_status": vm})
+    except Exception as e:
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
+
+@app.get("/api/services", dependencies=[Depends(require_auth)])
+def api_services(dep: bool = Depends(require_auth)) -> JSONResponse:
+    """
+    Retorna lista de serviços detectados e status da VM.
+    Formato: {"items": [...], "vm_status": {...}}
+    """
+    try:
+        data = list_services()
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            data = {"items": list(data) if data is not None else []}
+        items = data.get("items") or []
+        vm = data.get("vm_status") or vm_status()
+        return JSONResponse({"items": items, "vm_status": vm})
+    except Exception as e:
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
+
+@app.get("/api/services", dependencies=[Depends(require_auth)])
+def api_services_unico(dep: bool = Depends(require_auth)) -> JSONResponse:
+    """
+    Resposta canônica: {"items":[...], "vm_status": {...}}
+    Aceita que list_services() retorne list ou dict e normaliza.
+    """
+    try:
+        data = list_services()
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            data = {"items": list(data) if data is not None else []}
+        items = data.get("items") or []
+        vm = data.get("vm_status") or vm_status()
+        return JSONResponse({"items": items, "vm_status": vm})
+    except Exception as e:
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)

@@ -1,0 +1,119 @@
+import os, subprocess, secrets
+from typing import List, Dict
+from fastapi import FastAPI, Depends, HTTPException, status, Query
+from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+
+security = HTTPBasic()
+app = FastAPI(title="Bot Futures Panel", version="0.1.0")
+
+PANEL_USER = os.getenv("PANEL_USER", "admin")
+PANEL_PASS = os.getenv("PANEL_PASS", "changeme")
+ALLOWED = [s.strip() for s in os.getenv("PANEL_ALLOWED_SERVICES","").split(",") if s.strip()]
+
+def auth(credentials: HTTPBasicCredentials = Depends(security)):
+    if not (secrets.compare_digest(credentials.username, PANEL_USER) and
+            secrets.compare_digest(credentials.password, PANEL_PASS)):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized", headers={"WWW-Authenticate": "Basic"})
+    return True
+
+def run(cmd: list[str], use_sudo: bool=False) -> str:
+    if use_sudo:
+        cmd = ["sudo"] + cmd
+    try:
+        return subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True).strip()
+    except subprocess.CalledProcessError as e:
+        msg = e.output[-800:] if e.output else str(e)
+        raise HTTPException(status_code=400, detail=msg)
+
+def check_allowed(svc: str) -> str:
+    if not svc.endswith(".service") and not svc.endswith(".timer"):
+        svc = f"{svc}.service"
+    if svc not in ALLOWED:
+        raise HTTPException(status_code=400, detail=f"Service '{svc}' não permitido")
+    return svc
+
+INDEX_HTML = """<!doctype html>
+<html lang="pt-br"><head><meta charset="utf-8">
+<title>Bot Futures Panel</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:24px}
+h1{margin-top:0}.card{border:1px solid #ddd;border-radius:12px;padding:16px;margin-bottom:16px}
+.btn{padding:8px 12px;border:1px solid #ccc;border-radius:10px;background:#f7f7f7;cursor:pointer;margin-right:8px}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid #ccc;margin-left:8px}
+pre{background:#0b0b0b;color:#eaeaea;padding:12px;border-radius:10px;overflow:auto;max-height:45vh}
+</style></head><body>
+<h1>Bot Futures — Painel</h1>
+<div class="card">
+  <h3>Serviços</h3>
+  <div id="services"></div>
+</div>
+<div class="card">
+  <h3>Logs</h3>
+  <select id="svcSel"></select>
+  <input id="lines" type="number" value="200" min="50" step="50" style="width:6rem">
+  <button class="btn" onclick="loadLogs()">Carregar logs</button>
+  <pre id="logs">Selecione um serviço e clique em Carregar logs…</pre>
+</div>
+<script>
+async function getJSON(u){ const r=await fetch(u); if(!r.ok){alert('Erro: '+r.status); return null} return r.json() }
+async function txt(u){ const r=await fetch(u); return r.text() }
+async function refresh(){
+  const data = await getJSON('/api/services'); if(!data) return;
+  const c = document.getElementById('services'); const sSel = document.getElementById('svcSel');
+  c.innerHTML=''; sSel.innerHTML='';
+  data.forEach(row=>{
+    const div=document.createElement('div'); div.className='card';
+    div.innerHTML = '<b>'+row.name+'</b> <span class="badge">'+(row.active?'ativo':'inativo')+'</span>'
+      + '<div style="margin-top:8px">'
+      + '<button class="btn" onclick="act(\\''+row.name+'\\',\\'start\\')">Start</button>'
+      + '<button class="btn" onclick="act(\\''+row.name+'\\',\\'stop\\')">Stop</button>'
+      + '<button class="btn" onclick="act(\\''+row.name+'\\',\\'restart\\')">Restart</button>'
+      + '<button class="btn" onclick="showLogs(\\''+row.name+'\\')">Ver logs</button>'
+      + '</div>';
+    c.appendChild(div);
+    const opt=document.createElement('option'); opt.value=row.name; opt.textContent=row.name; sSel.appendChild(opt);
+  });
+}
+async function act(name, action){
+  const r = await fetch('/api/'+action+'/'+name, {method:'POST'});
+  if(!r.ok){ alert('Falhou: '+(await r.text())); } else { await refresh(); }
+}
+function showLogs(name){ document.getElementById('svcSel').value = name; loadLogs(); }
+async function loadLogs(){ const name=document.getElementById('svcSel').value; const n=document.getElementById('lines').value;
+  const text = await txt('/api/logs/'+name+'?n='+n); document.getElementById('logs').textContent = text; }
+refresh();
+</script>
+</body></html>"""
+
+@app.get("/", response_class=HTMLResponse)
+def index(_: bool = Depends(auth)):
+    return INDEX_HTML
+
+@app.get("/api/services")
+def services(_: bool = Depends(auth)) -> list[dict]:
+    out=[]
+    for svc in ALLOWED:
+        state = run(["sudo -n systemctl","is-active",svc])
+        out.append({"name": svc, "active": (state.strip()=="active")})
+    return out
+
+@app.post("/api/start/{service_name}")
+def svc_start(service_name: str, _: bool = Depends(auth)):
+    svc = check_allowed(service_name)
+    return {"ok": True, "out": run(["/usr/bin/sudo -n systemctl","start",svc], use_sudo=True)}
+
+@app.post("/api/stop/{service_name}")
+def svc_stop(service_name: str, _: bool = Depends(auth)):
+    svc = check_allowed(service_name)
+    return {"ok": True, "out": run(["/usr/bin/sudo -n systemctl","stop",svc], use_sudo=True)}
+
+@app.post("/api/restart/{service_name}")
+def svc_restart(service_name: str, _: bool = Depends(auth)):
+    svc = check_allowed(service_name)
+    return {"ok": True, "out": run(["/usr/bin/sudo -n systemctl","restart",svc], use_sudo=True)}
+
+@app.get("/api/logs/{service_name}", response_class=PlainTextResponse)
+def svc_logs(service_name: str, n: int = Query(200, ge=50, le=2000), _: bool = Depends(auth)):
+    svc = check_allowed(service_name)
+    return run(["/usr/bin/journalctl","-u",svc,"--no-pager","-n",str(n),"--output","short-iso"], use_sudo=True)

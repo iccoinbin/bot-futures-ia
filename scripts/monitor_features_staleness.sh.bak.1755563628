@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+LOG="/var/log/bot-futures-ia/feature-monitor.log"
+
+# carregar .env (opcional) e credenciais do DB
+set +u
+[ -f "$HOME/bot-futures-ia/.env" ] && set -a && source "$HOME/bot-futures-ia/.env" && set +a
+set -u
+export PGPASSWORD="${DB_PASSWORD:-}"
+
+DB_HOST="${DB_HOST:-localhost}"
+DB_PORT="${DB_PORT:-5432}"
+DB_USER="${DB_USER:-botfutures_user}"
+DB_NAME="${DB_NAME:-botfutures}"
+
+# thresholds (minutos) — pode ajustar via env
+STALE_1M_MIN="${STALE_1M_MIN:-3}"
+STALE_5M_MIN="${STALE_5M_MIN:-15}"
+STALE_15M_MIN="${STALE_15M_MIN:-35}"
+STALE_DEFAULT_MIN="${STALE_DEFAULT_MIN:-60}"
+
+now_iso="$(date -Is)"
+
+# Consulta última ts por (symbol,timeframe) e idade em segundos
+SQL="
+COPY (
+  SELECT symbol, timeframe, MAX(ts) AS last_ts,
+         EXTRACT(EPOCH FROM (now() - MAX(ts)))::int AS age_sec
+  FROM public.features
+  GROUP BY 1,2
+  ORDER BY 1,2
+) TO STDOUT WITH DELIMITER '|';
+"
+
+set +e
+OUT="$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -At -c "$SQL" 2>&1)"
+RC=$?
+set -e
+
+if [ $RC -ne 0 ]; then
+  echo "$now_iso MONITOR ERROR psql_failed msg=$(printf %q "$OUT")" | tee -a "$LOG"
+  logger -t feature-monitor "ERROR psql_failed"
+  exit 1
+fi
+
+if [ -z "$OUT" ]; then
+  echo "$now_iso MONITOR WARN_NO_ROWS features vazia" | tee -a "$LOG"
+  logger -t feature-monitor "WARN_NO_ROWS"
+  exit 1
+fi
+
+overall_rc=0
+
+while IFS='|' read -r sym tf last_ts age_sec; do
+  [ -z "${sym:-}" ] && continue
+  case "$tf" in
+    1m)  lim_min="$STALE_1M_MIN" ;;
+    5m)  lim_min="$STALE_5M_MIN" ;;
+    15m) lim_min="$STALE_15M_MIN" ;;
+    *)   lim_min="$STALE_DEFAULT_MIN" ;;
+  esac
+  lim_sec=$(( lim_min * 60 ))
+  if [ "${age_sec:-0}" -ge "$lim_sec" ]; then
+    echo "$now_iso ALERT_STALE sym=$sym tf=$tf last_ts=$last_ts age_s=$age_sec limit_s=$lim_sec" | tee -a "$LOG"
+    logger -t feature-monitor "ALERT_STALE $sym $tf age=${age_sec}s"
+    overall_rc=2
+  else
+    echo "$now_iso OK_FRESH sym=$sym tf=$tf last_ts=$last_ts age_s=$age_sec limit_s=$lim_sec" | tee -a "$LOG"
+  fi
+done <<< "$OUT"
+
+exit $overall_rc

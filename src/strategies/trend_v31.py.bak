@@ -1,0 +1,81 @@
+import pandas as pd
+from src.backtest.costs_v31 import trade_cost, est_slippage, funding_cost
+
+def run_trend(df: pd.DataFrame, cfg: dict):
+    tp_mult = cfg["execution"]["tp_atr_mult"]
+    sl_mult = cfg["execution"]["sl_atr_mult"]
+    partial_r = cfg["execution"]["partial_at_r"]
+    trailing_after = cfg["execution"]["trailing_after_r"]
+    trail_mult = cfg["execution"]["trailing_atr_mult"]
+    mode = cfg["execution"]["mode"]
+
+    maker_bps = cfg["slippage_fees"]["maker_bps"]
+    taker_bps = cfg["slippage_fees"]["taker_bps"]
+    slip_bps_base = cfg["slippage_fees"]["slip_bps_base"]
+    slip_frac_atr = cfg["slippage_fees"]["slip_bps_perc_of_atr"]
+
+    capital = cfg["risk"]["capital_usdt"]
+    risk_pct = cfg["risk"]["risk_per_trade_pct"]
+
+    position = 0
+    qty = 0.0
+    entry_price = 0.0
+    entry_time = None
+    tp = sl = trail = None
+    realized = 0.0
+    trades = []
+
+    for _, row in df.iterrows():
+        ts = row["close_time"]
+        price = float(row["close"]); atr = float(row["atr"])
+        trend = int(row["trend"])
+        r_value = sl_mult * atr if atr>0 else 0.0
+        if position == 0:
+            if r_value <= 0: 
+                continue
+            ema_fast = float(row.get("ema_fast", price))
+            if abs(price - ema_fast) > 0.2 * atr:
+                continue
+            qty = (capital * (risk_pct/100.0)) / r_value
+            entry_price = price if mode=="maker_first" else price + est_slippage(price, atr, slip_bps_base, slip_frac_atr)
+            entry_time = ts
+            if trend==1:
+                position = 1; tp = entry_price + tp_mult*atr; sl = entry_price - sl_mult*atr
+            else:
+                position = -1; tp = entry_price - tp_mult*atr; sl = entry_price + sl_mult*atr
+            trail = None
+        else:
+            if position==1:
+                if trailing_after>0 and (price-entry_price) >= trailing_after*r_value:
+                    trail = max(sl if sl is not None else -1e9, price - trail_mult*atr)
+                if partial_r>0 and (price-entry_price) >= partial_r*r_value and qty>0:
+                    half = qty*0.5
+                    exit_p = price if mode=="maker_first" else price - est_slippage(price, atr, slip_bps_base, slip_frac_atr)
+                    cost = trade_cost(entry_price, exit_p, half, maker_bps, taker_bps, mode)
+                    realized += (exit_p-entry_price)*half - cost
+                    qty -= half; sl = min(sl, entry_price)
+                hit = (price>=tp) or (price<=sl) or (trend==0) or (trail is not None and price<=trail)
+                if hit:
+                    exit_p = price if mode=="maker_first" else price - est_slippage(price, atr, slip_bps_base, slip_frac_atr)
+                    cost = trade_cost(entry_price, exit_p, qty, maker_bps, taker_bps, mode)
+                    pnl = (exit_p-entry_price)*qty - cost
+                    realized += pnl; trades.append(pnl)
+                    position=0; qty=0.0
+            else:
+                if trailing_after>0 and (entry_price-price) >= trailing_after*r_value:
+                    trail = min(sl if sl is not None else 1e12, price + trail_mult*atr)
+                if partial_r>0 and (entry_price-price) >= partial_r*r_value and qty>0:
+                    half = qty*0.5
+                    exit_p = price if mode=="maker_first" else price + est_slippage(price, atr, slip_bps_base, slip_frac_atr)
+                    cost = trade_cost(entry_price, exit_p, half, maker_bps, taker_bps, mode)
+                    realized += (entry_price-exit_p)*half - cost
+                    qty -= half; sl = max(sl, entry_price)
+                hit = (price<=tp) or (price>=sl) or (trend==1) or (trail is not None and price>=trail)
+                if hit:
+                    exit_p = price if mode=="maker_first" else price + est_slippage(price, atr, slip_bps_base, slip_frac_atr)
+                    cost = trade_cost(entry_price, exit_p, qty, maker_bps, taker_bps, mode)
+                    pnl = (entry_price-exit_p)*qty - cost
+                    realized += pnl; trades.append(pnl)
+                    position=0; qty=0.0
+
+    return realized, trades

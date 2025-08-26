@@ -1,0 +1,16 @@
+services:
+  pg:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: bot
+      POSTGRES_PASSWORD: botpass
+      POSTGRES_DB: market
+    ports: ["5432:5432"]
+    volumes:
+      - ./.data/pg:/var/lib/postgresql/data
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ./.data/redis:/data

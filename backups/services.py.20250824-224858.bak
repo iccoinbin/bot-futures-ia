@@ -1,0 +1,180 @@
+# coding: utf-8
+from typing import List, Dict, Tuple
+import subprocess, shlex, os, time
+
+# --- Config tmux: nomes "lógicos" e aliases aceitos pela API/UI ---
+TMUX_NAMES = ("fe_v1", "collector_candles")
+ALIASES = {
+    # feature engine
+    "feature_engine": "fe_v1", "feature-engine": "fe_v1",
+    "feature_engine_v1": "fe_v1", "feature-engine-v1": "fe_v1",
+    "fe_v1": "fe_v1",
+    # collector
+    "collector": "collector_candles", "collector-candles": "collector_candles",
+    "collector_candles": "collector_candles", "coletor": "collector_candles",
+}
+
+def _q(s:str) -> str: return shlex.quote(str(s))
+def _run(cmd:str, timeout:int=30) -> Tuple[int,str,str]:
+    p = subprocess.run(["bash","-lc",cmd], capture_output=True, text=True, timeout=timeout)
+    return p.returncode, p.stdout.strip(), p.stderr.strip()
+
+# ------------------------- TMUX helpers -------------------------
+def _tmux_cmd_default(name:str) -> str|None:
+    if name == "fe_v1":
+        return "cd ~/bot-futures-ia && source .venv/bin/activate && python -m src.feature_engine"
+    if name == "collector_candles":
+        return "cd ~/bot-futures-ia && source .venv/bin/activate && python -m src.collector.candles"
+    return None
+
+def _tmux_cmd(name:str) -> str|None:
+    return os.getenv(f"TMUX_CMD_{name.upper()}") or _tmux_cmd_default(name)
+
+def tmux_has(name:str) -> bool:
+    rc,_,_ = _run(f"tmux has-session -t {_q(name)}")
+    return rc == 0
+
+def tmux_start(name:str) -> Tuple[bool,str]:
+    if tmux_has(name): return True, "tmux: já em execução"
+    cmd = _tmux_cmd(name)
+    if not cmd: return False, f"tmux: sem comando para {name}"
+    rc,out,err = _run(f"tmux new-session -ds {_q(name)} {_q(cmd)}")
+    ok = (rc==0)
+    return ok, (out or err or ("tmux iniciado" if ok else "tmux falhou"))
+
+def tmux_stop(name:str) -> Tuple[bool,str]:
+    if not tmux_has(name): return True, "tmux: não está em execução"
+    rc,out,err = _run(f"tmux kill-session -t {_q(name)}")
+    ok = (rc==0)
+    return ok, (out or err or ("tmux encerrado" if ok else "tmux stop falhou"))
+
+# ----------------------- systemd helpers ------------------------
+def _sys_list() -> List[Dict]:
+    rc,out,_ = _run("sudo -n systemctl list-units --type=service --all --no-legend || true", timeout=20)
+    items = []
+    for ln in out.splitlines():
+        ln = ln.strip()
+        if not ln: continue
+        name = ln.split()[0]
+        active = (" active " in f" {ln} ") or (" running " in f" {ln} ")
+        items.append({"name": name, "running": active, "kind": "systemd"})
+    return items
+
+def _sys_start(unit:str) -> Tuple[bool,str]:
+    rc,out,err = _run(f"sudo sudo -n systemctl start {_q(unit)}")
+    return (rc==0), (out or err or "systemd start executado")
+
+def _sys_stop(unit:str) -> Tuple[bool,str]:
+    rc,out,err = _run(f"sudo sudo -n systemctl stop {_q(unit)}")
+    return (rc==0), (out or err or "systemd stop executado")
+
+# ---------------------- resolução de alvo -----------------------
+def _norm(n:str) -> str: return n.strip().lower().replace("-","_")
+
+def _resolve(raw:str) -> Tuple[str,str]:
+    n0 = raw.strip(); n = _norm(n0)
+    # tmux direto
+    if n in TMUX_NAMES: return "tmux", n
+    # alias -> tmux
+    if n in ALIASES: return "tmux", ALIASES[n]
+    # systemd explícito
+    if n0.endswith(".service"): return "systemd", n0
+    # tenta casar com units existentes
+    try:
+        for u in _sys_list():
+            base = u["name"].removesuffix(".service")
+            if _norm(base) == n:
+                return "systemd", u["name"]
+    except: pass
+    # fallback: tenta tmux pelo nome normalizado
+    for t in TMUX_NAMES:
+        if _norm(t) == n: return "tmux", t
+    return "unknown", raw
+
+# --------------------------- API --------------------------------
+def list_services() -> Dict:
+    base: dict[str,dict] = {}
+    # systemd
+    try:
+        for i in _sys_list(): base[i["name"]] = dict(i)
+    except: pass
+    # tmux (sempre mostrar)
+    for t in TMUX_NAMES:
+        base.setdefault(t, {"name": t, "kind": "tmux", "running": tmux_has(t)})
+    items = list(base.values())
+    items.sort(key=lambda x: (0 if x.get("kind")=="tmux" else 1, x.get("name","")))
+    return {"items": items, "vm_status": vm_status()}
+
+def service_start(name:str) -> Tuple[bool,str]:
+    n = _norm(name)
+    # 1) alias → alvo tmux
+    tgt = ALIASES.get(n, n)
+    if tgt in TMUX_NAMES:
+        ok, msg = tmux_start(tgt)
+        if ok: 
+            return ok, msg
+        # se falhou por pouco, mas a sessão já existe, considera ok
+        if tmux_has(tgt):
+            return True, "tmux: já em execução"
+    # 2) tmux direto pelo nome cru (fallback extra)
+    if n in TMUX_NAMES:
+        ok, msg = tmux_start(n)
+        if ok: 
+            return ok, msg
+    # 3) systemd explícito
+    if name.endswith(".service"):
+        return _sys_start(name)
+    # 4) tenta unit com sufixo .service
+    return _sys_start(f"{name}.service")
+
+def service_stop(name:str) -> Tuple[bool,str]:
+    n = _norm(name)
+    tgt = ALIASES.get(n, n)
+    if tgt in TMUX_NAMES:
+        ok, msg = tmux_stop(tgt)
+        if ok or not tmux_has(tgt):
+            return ok, msg
+    if name.endswith(".service"):
+        return _sys_stop(name)
+    return _sys_stop(f"{name}.service")
+
+def vm_status() -> Dict:
+    pass
+(name:str) -> Tuple[bool,str]:
+    kind, target = _resolve(name)
+    if kind == "tmux":    return tmux_stop(target)
+    if kind == "systemd": return _sys_stop(target)
+    ok,msg = tmux_stop(name)
+    if ok: return ok,msg
+    if not name.endswith(".service"): return _sys_stop(f"{name}.service")
+    return False, f"unknown unit: {name}"
+
+def vm_status() -> Dict:
+    try:
+        import psutil, os
+        boot = getattr(psutil, "boot_time", lambda: time.time())()
+        uptime = int(time.time() - boot)
+        try: load = os.getloadavg()
+        except: load = (0.0,0.0,0.0)
+        try: cpu = float(psutil.cpu_percent(interval=0.1))
+        except: cpu = 0.0
+        try:
+            mem = psutil.virtual_memory()
+            memd = {"total": int(mem.total), "used": int(mem.used),
+                    "free": int(getattr(mem, "available", 0) or (mem.total - mem.used)),
+                    "percent": float(mem.percent)}
+        except:
+            memd = {"total":0, "used":0, "free":0, "percent":0.0}
+        try:
+            du = psutil.disk_usage("/")
+            diskd = {"total": int(du.total), "used": int(du.used), "free": int(du.free),
+                     "percent": round(du.used/du.total*100,1) if du.total else 0.0,
+                     "mount": "/"}
+        except:
+            diskd = {"total":0, "used":0, "free":0, "percent":0.0, "mount":"/"}
+        return {"uptime":uptime, "load":[float(load[0]),float(load[1]),float(load[2])],
+                "cpu_percent":cpu, "memory":memd, "disk":diskd}
+    except:
+        return {"uptime":0, "load":[0.0,0.0,0.0], "cpu_percent":0.0,
+                "memory":{"total":0,"used":0,"free":0,"percent":0.0},
+                "disk":{"total":0,"used":0,"free":0,"percent":0.0,"mount":"/"}}

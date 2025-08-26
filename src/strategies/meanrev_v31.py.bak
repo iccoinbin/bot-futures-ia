@@ -1,0 +1,50 @@
+import pandas as pd
+from src.backtest.costs_v31 import trade_cost, est_slippage
+
+def run_meanrev(df: pd.DataFrame, cfg: dict):
+    k = 0.8
+    mode = cfg["execution"]["mode"]
+    maker_bps = cfg["slippage_fees"]["maker_bps"]
+    taker_bps = cfg["slippage_fees"]["taker_bps"]
+    slip_bps_base = cfg["slippage_fees"]["slip_bps_base"]
+    slip_frac_atr = cfg["slippage_fees"]["slip_bps_perc_of_atr"]
+    tp_mult = cfg["execution"]["tp_atr_mult"]
+    sl_mult = cfg["execution"]["sl_atr_mult"]
+    capital = cfg["risk"]["capital_usdt"]
+    risk_pct = cfg["risk"]["risk_per_trade_pct"]
+
+    realized = 0.0; trades=[]; position=0; qty=0.0; entry=0.0; tp=sl=None
+
+    for _, row in df.iterrows():
+        price=float(row["close"]); atr=float(row["atr"]); vwap=float(row["vwap"])
+        r_value = sl_mult*atr if atr>0 else 0.0
+        if position==0:
+            if r_value<=0: 
+                continue
+            long_sig = price <= vwap - k*atr
+            short_sig = price >= vwap + k*atr
+            if long_sig or short_sig:
+                qty = (capital*(risk_pct/100.0)) / r_value
+                if short_sig:
+                    entry = price if mode=="maker_first" else price + est_slippage(price, atr, slip_bps_base, slip_frac_atr)
+                    position = -1; tp = entry - tp_mult*atr; sl = entry + sl_mult*atr
+                else:
+                    entry = price if mode=="maker_first" else price + est_slippage(price, atr, slip_bps_base, slip_frac_atr)
+                    position = 1; tp = entry + tp_mult*atr; sl = entry - sl_mult*atr
+        else:
+            if position==1:
+                hit = (price>=tp) or (price<=sl) or (price>=vwap)
+                if hit:
+                    exit_p = price if mode=="maker_first" else price - est_slippage(price, atr, slip_bps_base, slip_frac_atr)
+                    cost = trade_cost(entry, exit_p, qty, maker_bps, taker_bps, mode)
+                    pnl=(exit_p-entry)*qty - cost; realized+=pnl; trades.append(pnl)
+                    position=0; qty=0.0
+            else:
+                hit = (price<=tp) or (price>=sl) or (price<=vwap)
+                if hit:
+                    exit_p = price if mode=="maker_first" else price + est_slippage(price, atr, slip_bps_base, slip_frac_atr)
+                    cost = trade_cost(entry, exit_p, qty, maker_bps, taker_bps, mode)
+                    pnl=(entry-exit_p)*qty - cost; realized+=pnl; trades.append(pnl)
+                    position=0; qty=0.0
+
+    return realized, trades

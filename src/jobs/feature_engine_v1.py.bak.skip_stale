@@ -1,0 +1,202 @@
+import os, time, sys
+import pandas as pd
+import psycopg2
+import psycopg2.extras as pxe
+
+# ---- Config ----
+DBH = os.getenv("DB_HOST","localhost")
+DBP = int(os.getenv("DB_PORT","5432"))
+DBN = os.getenv("DB_NAME","botfutures")
+DBU = os.getenv("DB_USER","botfutures_user")
+DBW = os.getenv("DB_PASSWORD","")
+
+SYMBOLS = [s.strip() for s in os.getenv("FEATURE_SYMBOLS","BTCUSDT,ETHUSDT").split(",") if s.strip()]
+TF = [t.strip() for t in os.getenv("FEATURE_TIMEFRAMES","1m,5m,15m").split(",") if t.strip()]
+POLL_SECS = int(os.getenv("FEATURE_POLL_SECONDS","30"))
+CANDLES_TABLE = os.getenv("CANDLES_TABLE","candles")  # esperado: colunas compatíveis
+
+def _log(msg):
+    try:
+        print(f"[feature_engine_v1] {msg}", flush=True)
+    except Exception:
+        pass
+
+def connect():
+    return psycopg2.connect(host=DBH, port=DBP, dbname=DBN, user=DBU, password=DBW)
+
+
+def latest_feature_ts(conn, symbol, timeframe):
+    with conn.cursor() as c:
+        c.execute(
+            \"SELECT MAX(ts) FROM public.features WHERE symbol=%s AND timeframe=%s\",
+            (symbol, timeframe)
+        )
+        row = c.fetchone()
+    return row[0] if row else None
+
+def normalize_columns(df: pd.DataFrame) -> pd.DataFrame | None:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    cols_lower = {str(c).lower(): c for c in df.columns}
+    def pick(keys, target):
+        for k in keys:
+            if k in cols_lower:
+                src = cols_lower[k]
+                if src != target and src in df.columns:
+                    df.rename(columns={src: target}, inplace=True)
+                return
+    pick(["ts","timestamp","time","open_time","dt"], "ts")
+    pick(["symbol","pair","ticker"], "symbol")
+    pick(["timeframe","tf","interval"], "timeframe")
+    pick(["open","o"], "open")
+    pick(["high","h"], "high")
+    pick(["low","l"], "low")
+    pick(["close","c","price"], "close")
+    pick(["volume","v","vol"], "volume")
+
+    # Tipos
+    if "ts" not in df.columns:
+        _log("MISSING_TS após normalização")
+        return pd.DataFrame()
+    try:
+        df["ts"] = pd.to_datetime(df["ts"], utc=True)
+    except Exception as e:
+        _log(f"TS_PARSE_FAIL {e}")
+        return pd.DataFrame()
+
+    for k in ("open","high","low","close","volume"):
+        if k in df.columns:
+            df[k] = pd.to_numeric(df[k], errors="coerce")
+
+    # Campos mínimos
+    if not {"symbol","timeframe","close","ts"}.issubset(set(df.columns)):
+        _log(f"SCHEMA_INCOMPLETE cols={list(df.columns)}")
+        return pd.DataFrame()
+
+    return df
+
+def fetch_candles(conn, symbol, timeframe, lookback=400) -> pd.DataFrame:
+    with conn.cursor(cursor_factory=pxe.DictCursor) as c:
+        c.execute(f"""
+            SELECT *
+            FROM {CANDLES_TABLE}
+            WHERE symbol = %s AND timeframe = %s
+            ORDER BY ts DESC NULLS LAST
+            LIMIT %s;
+        """, (symbol, timeframe, lookback))
+        rows = c.fetchall()
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame([dict(r) for r in rows])
+    _log(f"RAW cols={list(df.columns)} size={len(df)} sym={symbol} tf={timeframe}")
+    df = normalize_columns(df)
+    if df is None or df.empty:
+        _log(f"NORMALIZED_EMPTY sym={symbol} tf={timeframe}")
+        return pd.DataFrame()
+    _log(f"NORMALIZED cols={list(df.columns)} size={len(df)} sym={symbol} tf={timeframe}")
+    return df
+
+def compute_features(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty or "ts" not in df.columns or "close" not in df.columns:
+        return pd.DataFrame()
+    df = df.sort_values("ts").copy()
+
+    ema = df["close"].ewm(span=20, adjust=False).mean()
+    df["ema_slope_20"] = ema.diff(20)
+
+    if "volume" in df.columns and df["volume"].notna().any():
+        pv = (df["close"]*df["volume"]).rolling(20, min_periods=1).sum()
+        vv = df["volume"].rolling(20, min_periods=1).sum().replace(0, 1e-12)
+        vwap20 = pv / vv
+    else:
+        vwap20 = df["close"].rolling(20, min_periods=1).mean()
+    df["vwap_slope_20"] = vwap20.diff(20)
+
+    ret = df["close"].pct_change().abs()
+    df["adx_14"] = (ret.rolling(14, min_periods=1).mean()*100.0)
+
+    if "high" in df.columns and "low" in df.columns:
+        tr = (df["high"]-df["low"]).abs()
+        df["atr_14"] = tr.rolling(14, min_periods=1).mean()
+    else:
+        df["atr_14"] = pd.NA
+
+    df["std_20"] = df["close"].rolling(20, min_periods=1).std()
+
+    def regime_row(s):
+        if pd.isna(s): return "sideways"
+        if s > 0: return "bull"
+        if s < 0: return "bear"
+        return "sideways"
+    df["regime"] = df["ema_slope_20"].apply(regime_row)
+
+    # Retorna só última linha com colunas padrões
+    keep = ["ts","symbol","timeframe","ema_slope_20","vwap_slope_20","adx_14","atr_14","std_20","regime"]
+    return df[keep].tail(1)
+
+def upsert_features(cur, rows):
+    if not rows: return
+    pxe.execute_values(
+        cur,
+        """
+        INSERT INTO public.features
+        (ts, symbol, timeframe, ema_slope_20, vwap_slope_20, adx_14, atr_14, std_20, regime)
+        VALUES %s
+        ON CONFLICT (symbol, timeframe, ts) DO UPDATE SET
+          ema_slope_20 = EXCLUDED.ema_slope_20,
+          vwap_slope_20 = EXCLUDED.vwap_slope_20,
+          adx_14       = EXCLUDED.adx_14,
+          atr_14       = EXCLUDED.atr_14,
+          std_20       = EXCLUDED.std_20,
+          regime       = EXCLUDED.regime;
+        """,
+        rows, page_size=200
+    )
+
+def main_loop():
+    _log(f"START symbols={SYMBOLS} tf={TF} poll={POLL_SECS}s")
+    while True:
+        total = 0
+        try:
+            with connect() as conn:
+                for sym in SYMBOLS:
+                    for tf in TF:
+                            df = fetch_candles(conn, sym, tf)
+                            if df.empty:
+                                _log(f"SKIP_EMPTY sym={sym} tf={tf}")
+                                continue
+                            feat = compute_features(df)
+                            if feat is None or feat.empty:
+                                _log(f"COMPUTED_EMPTY sym={sym} tf={tf}")
+                                continue
+                        curr_ts = pd.to_datetime(feat['ts'].max(), utc=True)
+                        last_ts = latest_feature_ts(conn, sym, tf)
+                        if last_ts is not None and curr_ts <= last_ts:
+                            _log(f\"SKIP_STALE sym={sym} tf={tf} ts={curr_ts}\")
+                            continue
+                            rows = [
+                                (
+                                    row["ts"], row["symbol"], row["timeframe"],
+                                    float(row.get("ema_slope_20", 0) or 0),
+                                    float(row.get("vwap_slope_20", 0) or 0),
+                                    float(row.get("adx_14", 0) or 0),
+                                    (None if pd.isna(row.get("atr_14")) else float(row.get("atr_14") or 0)),
+                                    float(row.get("std_20", 0) or 0),
+                                    str(row.get("regime") or "sideways"),
+                                )
+                                for _, row in feat.iterrows()
+                            ]
+                            with conn.cursor() as c2:
+
+                                upsert_features(c2, rows)
+
+                            conn.commit()
+                            total += len(rows)
+                            _log(f"UPSERT {len(rows)} sym={sym} tf={tf}")
+                _log(f"UPSERT_TOTAL {total}")
+        except Exception as e:
+            _log(f"LOOP_ERROR {type(e).__name__}: {e}")
+        time.sleep(POLL_SECS)
+
+if __name__ == "__main__":
+    main_loop()

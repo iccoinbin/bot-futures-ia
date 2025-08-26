@@ -1,0 +1,63 @@
+binance:
+  testnet: true
+events:
+  block_funding_flip: true
+  block_high_impact_news: true
+execution:
+  mode: maker_first
+  partial_at_r: 0.8
+  sl_atr_mult: 1.0
+  tp_atr_mult: 2.0
+  trailing_after_r: 1.0
+  trailing_atr_mult: 0.8
+filters:
+  adx_trend_min: 18
+  atrq_high: 0.8
+  atrq_low: 0.25
+  block_funding_minutes: 10
+  use_adx_filter: true
+  use_atr_quantile: true
+funding:
+  rate_per_hour: 0.0
+history_days: 60
+indicators:
+  adx_period: 14
+  atr_period: 14
+  bb_period: 20
+  bb_stddev: 2.0
+  ema_fast: 21
+  ema_slow: 55
+  rsi_period: 14
+  vwap_window: 20
+logging:
+  enable_audit: true
+  log_features: true
+  log_path: logs/
+  pnl_report_path: reports/
+  save_trades: true
+risk:
+  capital_usdt: 10000
+  correlated_risk_limit: 0.01
+  max_consecutive_losses: 4
+  max_daily_loss_pct: 0.015
+  max_drawdown_pct: 0.08
+  max_open_positions: 3
+  max_weekly_loss_pct: 0.04
+  risk_per_trade: 0.005
+  risk_per_trade_pct: 0.5
+runtime:
+  dry_run: true
+  history_minutes: 600
+  poll_interval_sec: 10
+  symbol: BTCUSDT
+  timeframe: 5m
+slippage_fees:
+  maker_bps: 0.018
+  slip_bps_base: 0.02
+  slip_bps_perc_of_atr: 0.1
+  slippage_bps: 0.02
+  taker_bps: 0.045
+symbols:
+- BTCUSDT
+- ETHUSDT
+timeframe: 5m

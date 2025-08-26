@@ -1,0 +1,17 @@
+services:
+  bot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: bot-futures-ia:dev
+    working_dir: /app
+    volumes:
+      - ../:/app
+    environment:
+      - BINANCE_UMFUTURES_API_KEY=${BINANCE_UMFUTURES_API_KEY}
+      - BINANCE_UMFUTURES_API_SECRET=${BINANCE_UMFUTURES_API_SECRET}
+      - BINANCE_UMFUTURES_BASE_URL=${BINANCE_UMFUTURES_BASE_URL}
+      - SYMBOL=${SYMBOL}
+      - TF_DECISION=${TF_DECISION}
+      - TF_CONTEXT=${TF_CONTEXT}
+    tty: true

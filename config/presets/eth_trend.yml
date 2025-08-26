@@ -1,0 +1,15 @@
+symbols: ["ETHUSDT"]
+timeframe: "5m"
+history_days: 60
+filters:
+  adx_trend_min: 22
+  use_atr_quantile: true
+  atrq_low: 0.30
+  atrq_high: 0.75
+execution:
+  mode: "taker"
+  tp_atr_mult: 2.3
+  sl_atr_mult: 0.9
+  partial_at_r: 1.0
+  trailing_after_r: 1.2
+  trailing_atr_mult: 0.9

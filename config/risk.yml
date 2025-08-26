@@ -1,0 +1,9 @@
+max_daily_loss_pct: 1.8
+max_weekly_loss_pct: 5.0
+max_drawdown_pct: 10.0
+risk_per_trade_pct: 0.35
+max_open_positions: 3
+pause_after_consecutive_losses: 3
+use_isolated_margin: true
+reduce_only_on_exit: true
+use_oco_protection: true

@@ -1,0 +1,37 @@
+#!/bin/bash
+# Não deixe o script morrer por bobeira de tail; pare no que for crítico
+set -u
+
+ROOT="$HOME/bot-futures-ia"
+cd "$ROOT"
+
+# venv (não dá erro se não existir)
+[[ -f .venv/bin/activate ]] && source .venv/bin/activate
+
+# para imports do projeto (src/…)
+export PYTHONPATH="$ROOT:$PYTHONPATH"
+
+# logs sempre presentes
+mkdir -p logs
+touch logs/{fetch.log,features.log,executor.log}
+chmod -R u+rwX logs
+
+echo "[BOT] Instalando dependências (silencioso)…"
+pip install -r requirements.txt -q || echo "[WARN] pip retornou código não-zero; seguindo…"
+
+echo "[BOT] Subindo DataHub (pg/redis)…"
+docker compose -f docker-compose.datahub.yml up -d
+
+echo "[BOT] Iniciando coleta…"
+nohup python3 src/scripts/02c_fetch_multi.py      >> logs/fetch.log     2>&1 &
+
+echo "[BOT] Iniciando engine de features…"
+nohup python3 src/scripts/03_build_features.py    >> logs/features.log  2>&1 &
+
+echo "[BOT] Iniciando executor (testnet)…"
+nohup python3 src/scripts/executor_testnet_v33.py >> logs/executor.log  2>&1 &
+
+echo "[BOT] Processos disparados. Acompanhe em logs/"
+
+# Mantenha o serviço vivo SEM falhar se algum log ainda não existir
+tail -F --retry logs/fetch.log logs/features.log logs/executor.log || true
