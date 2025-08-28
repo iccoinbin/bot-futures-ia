@@ -1,0 +1,31 @@
+ D scripts/monitor_features_staleness.sh.bak.1755563628
+ D scripts/monitor_features_staleness.sh.bak.g5.1755565423
+ D src/jobs/feature_engine_v1.py.bak.1755550534.skipstale
+ D src/jobs/feature_engine_v1.py.bak.20250817140647
+ D src/jobs/feature_engine_v1.py.bak.20250817142718
+ D src/jobs/feature_engine_v1.py.bak.20250817142800
+ D src/jobs/feature_engine_v1.py.bak.consolidated.1755561464
+ D src/jobs/feature_engine_v1.py.bak.g2.1755564702
+ D src/jobs/feature_engine_v1.py.bak.loglevel.1755561251
+ D src/jobs/feature_engine_v1.py.bak.oc
+ D src/jobs/feature_engine_v1.py.bak.reentrant
+ D src/jobs/feature_engine_v1.py.bak.rewrite.1755554482
+ D src/jobs/feature_engine_v1.py.bak.skip_stale
+ D src/jobs/feature_engine_v1.py.bak.skip_stale.1755551216
+ D src/jobs/feature_engine_v1.py.bak.skip_stale.1755551596
+ D src/scripts/07_backtest_v31.py.bak
+ D src/scripts/07_backtest_v31.py.bak2
+ D src/scripts/executor_testnet_v33.py.b.bak
+ D src/scripts/executor_testnet_v33.py.bak
+ D src/scripts/executor_testnet_v33.py.bak.1755123822
+ D src/scripts/executor_testnet_v33.py.bak.1755123941
+ D src/scripts/executor_testnet_v33.py.bak.1755124109
+ D src/scripts/executor_testnet_v33.py.bak.1755124370
+ D src/strategies/orchestrator_v31.py.bak
+ D start_bot.sh.bak.2025-08-14_233036
+?? bf_review_pack_20250828_090218/
+?? src/core/risk_guard.py
+?? src/core/risk_kernel.py
+?? src/core/risk_kernel.py.bak.1756302518
+?? src/core/risk_kernel.py.bak.1756302636
+?? src/services/equity_feeder.py

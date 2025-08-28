@@ -1,0 +1,32 @@
+== WHOAMI ==
+iccoin_bin
+== UNAME ==
+Linux bot-futures-ia 6.1.0-37-cloud-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.140-1 (2025-05-22) x86_64 GNU/Linux
+== HOSTNAME ==
+ Static hostname: bot-futures-ia
+       Icon name: computer-vm
+         Chassis: vm 🖴
+      Machine ID: 05680414aacf48f3916bb0a9795b0a40
+         Boot ID: a955d5dba8a84bc49d977ce3ff58c8b1
+  Virtualization: google
+Operating System: Debian GNU/Linux 12 (bookworm)
+          Kernel: Linux 6.1.0-37-cloud-amd64
+    Architecture: x86-64
+ Hardware Vendor: Google
+  Hardware Model: Google Compute Engine
+Firmware Version: Google
+== UPTIME ==
+ 09:02:18 up 14 days, 18:33,  3 users,  load average: 0.03, 0.06, 0.07
+== DISKS ==
+Filesystem      Size  Used Avail Use% Mounted on
+udev            3.9G     0  3.9G   0% /dev
+tmpfs           796M  888K  795M   1% /run
+/dev/sda1       9.7G  7.2G  2.0G  79% /
+tmpfs           3.9G  1.1M  3.9G   1% /dev/shm
+tmpfs           5.0M     0  5.0M   0% /run/lock
+/dev/sda15      124M   12M  113M  10% /boot/efi
+tmpfs           796M     0  796M   0% /run/user/1000
+== MEM ==
+               total        used        free      shared  buff/cache   available
+Mem:           7.8Gi       1.5Gi       1.2Gi        59Mi       5.4Gi       6.3Gi
+Swap:             0B          0B          0B
